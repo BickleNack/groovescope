@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { createTimer } = require('../utils/perf');
 
 class YouTubeService {
   constructor() {
@@ -32,6 +33,7 @@ class YouTubeService {
    */
   async startConversion(youtubeUrl, quality = 'medium') {
     try {
+      const timer = createTimer('youtube.startConversion');
       if (!this.rapidApiKey) {
         throw new Error('RapidAPI key not configured');
       }
@@ -42,6 +44,7 @@ class YouTubeService {
       }
 
       console.log(`Starting conversion for video: ${videoId} with new API`);
+      timer.mark('validated');
 
       // Map quality to the new API format
       const apiQuality = this.mapQualityToAPI(quality);
@@ -63,6 +66,7 @@ class YouTubeService {
           timeout: 30000
         }
       );
+      timer.mark('api response');
 
       if (!response.data) {
         throw new Error('No response data from YouTube API');
@@ -75,10 +79,12 @@ class YouTubeService {
 
       console.log(`Conversion job started for video: ${videoId}`);
 
+      timer.end('parsed job');
       return jobData;
 
     } catch (error) {
       console.error('YouTube conversion start error:', error);
+      try { createTimer('youtube.startConversion').end('error', { message: error.message }); } catch (_) {}
 
       // Handle specific RapidAPI errors
       if (error.response) {
@@ -380,6 +386,7 @@ class YouTubeService {
    * @returns {string} - Final download URL
    */
   async waitForConversion(downloadUrl, conversionId, maxAttempts = 30) {
+    const timer = createTimer('youtube.waitForConversion', { enabled: process.env.PERF_LOGS === '1' });
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         console.log(`Checking conversion status... Attempt ${attempt}/${maxAttempts}`);
@@ -389,6 +396,7 @@ class YouTubeService {
         
         if (response.status === 200) {
           console.log('✅ Conversion completed, file is ready!');
+          timer.end(`ready at attempt ${attempt}`);
           return downloadUrl;
         }
         
@@ -398,10 +406,12 @@ class YouTubeService {
           const waitTime = Math.min(5000, 1000 * attempt); // Progressive wait: 1s, 2s, 3s... up to 5s
           console.log(`File not ready, waiting ${waitTime}ms before retry...`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
+          timer.mark(`retry ${attempt}`);
         }
       }
     }
     
+    timer.end('timeout');
     throw new Error('Conversion timeout: Video took too long to process');
   }
 

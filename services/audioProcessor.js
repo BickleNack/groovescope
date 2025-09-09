@@ -1,7 +1,8 @@
-ub const axios = require('axios');
+const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
+const { createTimer } = require('../utils/perf');
 
 class AudioProcessor {
   constructor() {
@@ -27,10 +28,12 @@ class AudioProcessor {
    * @returns {Object} - Peaks data and metadata
    */
   async generatePeaks(audioUrl, videoId = null) {
+    const timer = createTimer('audioProcessor.generatePeaks');
     let tempFilePath = null;
     
     try {
       console.log('Downloading audio file...');
+      timer.mark('start download');
       
       // Download audio file
       const response = await axios({
@@ -42,6 +45,7 @@ class AudioProcessor {
           'User-Agent': 'GrooveScope/1.0'
         }
       });
+      timer.mark('downloaded');
 
       if (!response.data) {
         throw new Error('No audio data received');
@@ -50,17 +54,21 @@ class AudioProcessor {
       // Save to temporary file
       tempFilePath = path.join(this.tempDir, `audio_${Date.now()}.mp3`);
       await fs.writeFile(tempFilePath, response.data);
+      timer.mark('saved to temp');
 
       console.log(`Audio file saved to: ${tempFilePath}`);
       console.log(`File size: ${response.data.length} bytes`);
 
       // Process audio to extract peaks
       const peaksData = await this.extractPeaksFromFile(tempFilePath, videoId);
+      timer.mark('extracted peaks');
 
+      timer.end('done');
       return peaksData;
 
     } catch (error) {
       console.error('Audio processing error:', error);
+      try { createTimer('audioProcessor.generatePeaks').end('error', { message: error.message }); } catch (_) {}
       throw error;
     } finally {
       // Clean up temporary file
@@ -108,6 +116,7 @@ class AudioProcessor {
   async simulatePeaksExtraction(audioBuffer) {
     try {
       console.log('Analyzing real audio data...');
+      const timer = createTimer('audioProcessor.simulatePeaksExtraction');
       
       const fileSize = audioBuffer.length;
       this.currentAudioSize = fileSize;
@@ -123,6 +132,7 @@ class AudioProcessor {
       
       // Extract real amplitude data from MP3 file
       const peaks = this.extractRealAmplitudes(audioBuffer, targetPeaks);
+      timer.mark(`extracted ${targetPeaks} peaks`);
       
       return {
         peaks,

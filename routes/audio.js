@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 const youtubeService = require('../services/youtubeService');
+const { createTimer } = require('../utils/perf');
 
 const router = express.Router();
 
@@ -15,9 +16,12 @@ const supabase = createClient(
 router.post('/process', async (req, res) => {
   try {
     const { youtubeUrl, quality = 'medium' } = req.body;
+    const timer = createTimer('audio.process');
+    const includeTimings = process.env.PERF_LOGS === '1' || req.query.debug === '1';
 
     // Validate input
     if (!youtubeUrl) {
+      timer.end('invalid request: missing youtubeUrl');
       return res.status(400).json({
         error: 'Missing required parameter',
         message: 'youtubeUrl is required'
@@ -27,6 +31,7 @@ router.post('/process', async (req, res) => {
     // Validate YouTube URL
     const videoId = youtubeService.extractVideoId(youtubeUrl);
     if (!videoId) {
+      timer.end('invalid request: bad youtube url');
       return res.status(400).json({
         error: 'Invalid YouTube URL',
         message: 'Please provide a valid YouTube video URL'
@@ -34,6 +39,7 @@ router.post('/process', async (req, res) => {
     }
 
     console.log(`Processing YouTube video: ${videoId}`);
+    timer.mark('validated input', { videoId, quality });
 
     // Check cache first
     const { data: cachedData, error: cacheError } = await supabase
@@ -42,10 +48,11 @@ router.post('/process', async (req, res) => {
       .eq('video_id', videoId)
       .eq('quality', quality)
       .single();
+    timer.mark('cache lookup');
 
     if (!cacheError && cachedData) {
       console.log(`Cache hit for video: ${videoId}`);
-      return res.json({
+      const payload = {
         success: true,
         status: 'completed',
         cached: true,
@@ -56,14 +63,19 @@ router.post('/process', async (req, res) => {
           metadata: cachedData.metadata,
           createdAt: cachedData.created_at
         }
-      });
+      };
+      timer.end('respond cache hit');
+      if (includeTimings) payload.timings = timer.getSummary().marks;
+      return res.json(payload);
     }
 
     // Get download information from the new API (much faster!)
     console.log(`Getting download info for video: ${videoId}`);
     const conversionJob = await youtubeService.startConversion(youtubeUrl, quality);
+    timer.mark('youtube startConversion');
 
     if (!conversionJob || !conversionJob.downloadUrl) {
+      timer.end('failed: missing downloadUrl');
       return res.status(500).json({
         error: 'Download info failed',
         message: 'Unable to get download information for the YouTube video'
@@ -93,6 +105,7 @@ router.post('/process', async (req, res) => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       });
+    timer.mark('cache upsert');
 
     if (insertError) {
       console.error('Cache insertion error:', insertError);
@@ -100,7 +113,7 @@ router.post('/process', async (req, res) => {
     }
 
     // Return the audio URL for WaveSurfer to process
-    res.json({
+    const responseBody = {
       success: true,
       status: 'completed',
       cached: false,
@@ -111,10 +124,14 @@ router.post('/process', async (req, res) => {
         metadata,
         processedAt: new Date().toISOString()
       }
-    });
+    };
+    timer.end('respond success');
+    if (includeTimings) responseBody.timings = timer.getSummary().marks;
+    res.json(responseBody);
 
   } catch (error) {
     console.error('Audio processing error:', error);
+    try { createTimer('audio.process').end('error', { message: error.message }); } catch (_) {}
 
     // Handle specific error types
     if (error.message.includes('rate limit')) {
