@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: groovescope-backend
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    
+    # Environment variables
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: RAPIDAPI_KEY
+        sync: false  # Set this in Render dashboard
+      - key: SUPABASE_URL
+        sync: false  # Set this in Render dashboard
+      - key: SUPABASE_ANON_KEY
+        sync: false  # Set this in Render dashboard
+      - key: FRONTEND_URL
+        value: ""  # Set to your Chrome extension or frontend URL if applicable
+    
+    # Auto-deploy settings
+    autoDeploy: true
+    
+    # Resource limits
+    disk:
+      name: groovescope-disk
+      size: 1GB
+      mountPath: /tmp
+    
+    # Scaling settings
+    numInstances: 1
+    
+    # Health check configuration
+    healthCheckGracePeriodSeconds: 60
+    healthCheckPath: /api/health
+    healthCheckIntervalSeconds: 30
+    healthCheckTimeoutSeconds: 10
+    
+    # Runtime settings
+    dockerfilePath: ./Dockerfile  # Optional: if you want to use Docker instead
+    rootDir: .
+    
+# Optional: Database (if you want to use Render's PostgreSQL instead of Supabase)
+# databases:
+#   - name: groovescope-db
+#     plan: starter
+#     databaseName: groovescope
+#     user: groovescope_user
